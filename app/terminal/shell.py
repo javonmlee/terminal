@@ -58,13 +58,19 @@ class Shell:
     async def _show_agents(self):
         hosts = []
         for i, a in enumerate(await self._sorted_agent_list()):
-            hosts.append(dict(idx=str(i), host=a.host, user=a.username, priv=a.privilege, paw=a.paw))
+            hosts.append(dict(idx=str(i), host=a.host, user=a.username, priv=a.privilege, paw=a.paw, trusted=a.trusted))
         if not hosts:
             self.console.hint('Deploy 54ndc47 agents to add new hosts')
         await self.console.table(hosts)
 
     async def _show_sessions(self):
-        await self.console.table(self.session.sessions)
+        formatted_sessions = []
+        for s in self.session.sessions:
+            s = s.copy()
+            if 'connection' in s:
+                s['remote_socket'] = s.pop('connection').getpeername()
+            formatted_sessions.append(s)
+        await self.console.table(formatted_sessions)
 
     async def _connect_session(self, cmd):
         session = int(cmd.split(' ')[1])
@@ -98,6 +104,12 @@ class Shell:
                 Link(command=self.app_svc.encode_string(command), paw=agent.paw, score=0, jitter=0,
                      ability=abilities[0], operation=op.id, cleanup=self.app_svc.encode_string(cleanup))
             )
+            asyncio.get_event_loop().create_task(self._operation_closer(op, agent.paw))
             self.console.line('Queued. Waiting for agent to beacon...', 'green')
         else:
             self.console.line('No agent found for idx = %s.' % agent_idx, 'red')
+
+    @staticmethod
+    async def _operation_closer(operation, link_paw):
+        await operation.wait_for_links_completion((link_paw,))
+        await operation.close()
